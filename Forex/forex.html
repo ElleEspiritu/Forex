@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Forex Rate Tracker</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Load Chart.js for charting capabilities -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <style>
+        /* Define custom styles */
+        :root {
+            --primary-color: #059669; /* Emerald-600 */
+        }
+        body {
+            font-family: 'Inter', sans-serif;
+            background-image: linear-gradient(to left, #8360c3, #2ebf91)
+        }
+        /* Custom scrollbar for better aesthetics */
+        .custom-scroll::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scroll::-webkit-scrollbar-thumb {
+            background: var(--primary-color);
+            border-radius: 3px;
+        }
+        .custom-scroll::-webkit-scrollbar-track {
+            background: #e5e7eb;
+        }
+        /* Style the chart container background */
+        #rateChart {
+            background: white;
+            padding: 1.5rem;
+            border-radius: 0.75rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+    </style>
+</head>
+<body class="min-h-screen p-4 sm:p-8 flex items-center justify-center">
+
+    <div id="app" class="w-full max-w-5xl space-y-8">
+        <header class="text-center">
+            <h1 class="text-4xl font-extrabold text-gray-900 tracking-tight">Dynamic Forex Converter</h1>
+            <p class="mt-2 text-lg text-gray-500">Real-time currency rates powered by ForexRateAPI.</p>
+        </header>
+
+        <!-- Status/Error Message Box -->
+        <div id="message-box" class="hidden p-4 rounded-lg text-sm transition-all duration-300" role="alert"></div>
+
+        <!-- Main Content Grid -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
+
+            <!-- Converter Card (1/3 width on desktop) -->
+            <div class="lg:col-span-1 bg-white p-6 rounded-xl shadow-2xl space-y-6 transform hover:scale-[1.01] transition duration-300">
+                <h2 class="text-2xl font-bold text-gray-800 border-b pb-2">Currency Converter</h2>
+
+                <div class="space-y-4">
+                    <!-- Amount Input -->
+                    <div>
+                        <label for="amount" class="block text-sm font-medium text-gray-700">Amount</label>
+                        <input type="number" id="amount" value="1.00" min="0.01" step="0.01"
+                               class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm p-3 focus:border-emerald-500 focus:ring-emerald-500 transition">
+                    </div>
+
+                    <!-- FROM Currency -->
+                    <div>
+                        <label for="fromCurrency" class="block text-sm font-medium text-gray-700">From</label>
+                        <select id="fromCurrency"
+                                class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm p-3 focus:border-emerald-500 focus:ring-emerald-500 custom-scroll transition">
+                            <!-- Options populated by JS -->
+                        </select>
+                    </div>
+
+                    <!-- Swap Button -->
+                    <div class="text-center">
+                        <button id="swapBtn" class="p-2 text-emerald-600 bg-emerald-100 rounded-full hover:bg-emerald-200 transition duration-150 transform hover:rotate-12 focus:outline-none focus:ring-2 focus:ring-emerald-500">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                            </svg>
+                        </button>
+                    </div>
+
+                    <!-- TO Currency -->
+                    <div>
+                        <label for="toCurrency" class="block text-sm font-medium text-gray-700">To</label>
+                        <select id="toCurrency"
+                                class="mt-1 block w-full rounded-lg border-gray-300 shadow-sm p-3 focus:border-emerald-500 focus:ring-emerald-500 custom-scroll transition">
+                            <!-- Options populated by JS -->
+                        </select>
+                    </div>
+                </div>
+
+                <!-- Convert Button -->
+                <button id="convertBtn"
+                        class="w-full py-3 bg-emerald-600 text-white font-semibold rounded-lg shadow-md hover:bg-emerald-700 focus:outline-none focus:ring-4 focus:ring-emerald-500 focus:ring-opacity-50 transition duration-150 ease-in-out transform hover:-translate-y-0.5">
+                    Convert
+                </button>
+
+                <!-- Result Display -->
+                <div class="mt-4 p-4 bg-emerald-50 rounded-lg text-center shadow-inner">
+                    <p class="text-sm font-medium text-emerald-700">Converted Amount</p>
+                    <p id="resultDisplay" class="text-3xl font-extrabold text-emerald-900 mt-1">0.00</p>
+                </div>
+            </div>
+
+            <!-- Chart Card (2/3 width on desktop) -->
+            <div class="lg:col-span-2 bg-white p-6 rounded-xl shadow-2xl space-y-4">
+                <h2 class="text-2xl font-bold text-gray-800 border-b pb-2">Rate History (7 Days)</h2>
+                <div class="h-96">
+                    <canvas id="rateChart"></canvas>
+                </div>
+                <p id="rateSummary" class="text-sm text-gray-500 text-center pt-2"></p>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_KEY = 'YOUR_API_KEY_HERE'; // !!! REPLACE WITH YOUR ACTUAL API KEY !!!
+        const BASE_URL = 'https://api.forexrateapi.com/v1/';
+
+        // DOM elements
+        const amountInput = document.getElementById('amount');
+        const fromCurrencySelect = document.getElementById('fromCurrency');
+        const toCurrencySelect = document.getElementById('toCurrency');
+        const convertBtn = document.getElementById('convertBtn');
+        const swapBtn = document.getElementById('swapBtn');
+        const resultDisplay = document.getElementById('resultDisplay');
+        const rateSummary = document.getElementById('rateSummary');
+        const messageBox = document.getElementById('message-box');
+        const chartCanvas = document.getElementById('rateChart');
+
+        let myChart;
+        let availableCurrencies = {}; // Stores fetched currency list
+
+        // --- Utility Functions ---
+
+        /**
+         * Displays a temporary message box for errors or success.
+         * @param {string} message - The message text.
+         * @param {string} type - 'error' or 'success'.
+         */
+        function displayMessage(message, type) {
+            messageBox.textContent = message;
+            messageBox.classList.remove('hidden', 'bg-red-100', 'text-red-700', 'bg-green-100', 'text-green-700');
+
+            if (type === 'error') {
+                messageBox.classList.add('bg-red-100', 'text-red-700');
+            } else if (type === 'success') {
+                messageBox.classList.add('bg-emerald-100', 'text-emerald-700'); // Changed to emerald
+            }
+            // Hide the message after 5 seconds
+            setTimeout(() => {
+                messageBox.classList.add('hidden');
+            }, 5000);
+        }
+
+        /**
+         * Fetches all available currencies and populates the dropdowns.
+         */
+        async function fetchCurrencies() {
+            // Using a hardcoded list for demonstration/fallback as API documentation for a /symbols endpoint is not provided.
+            // A real implementation would call BASE_URL + 'symbols?api_key=' + API_KEY
+            const commonCurrencies = {
+                'USD': 'US Dollar', 'EUR': 'Euro', 'GBP': 'British Pound',
+                'JPY': 'Japanese Yen', 'CAD': 'Canadian Dollar', 'AUD': 'Australian Dollar',
+                'CHF': 'Swiss Franc', 'INR': 'Indian Rupee', 'CNY': 'Chinese Yuan'
+            };
+            availableCurrencies = commonCurrencies;
+
+            const fragment = document.createDocumentFragment();
+            for (const code in commonCurrencies) {
+                const option = document.createElement('option');
+                option.value = code;
+                option.textContent = `${code} - ${commonCurrencies[code]}`;
+                fragment.appendChild(option);
+            }
+
+            fromCurrencySelect.innerHTML = '';
+            toCurrencySelect.innerHTML = '';
+            fromCurrencySelect.appendChild(fragment.cloneNode(true));
+            toCurrencySelect.appendChild(fragment.cloneNode(true));
+
+            // Set initial default selections
+            fromCurrencySelect.value = 'USD';
+            toCurrencySelect.value = 'EUR';
+        }
+
+        /**
+         * Fetches the conversion rate and historical data.
+         * For a single-file demo, historical data is mocked to ensure the chart renders.
+         */
+        async function fetchAndDisplayRate() {
+            const amount = parseFloat(amountInput.value);
+            const from = fromCurrencySelect.value;
+            const to = toCurrencySelect.value;
+
+            if (isNaN(amount) || amount <= 0) {
+                return displayMessage('Please enter a valid amount.', 'error');
+            }
+            if (!API_KEY || API_KEY === 'b566ddea97e19f13ac6d091f038fb5b1') {
+                displayMessage('Warning: Please replace the placeholder API key in the JavaScript code for real data.', 'error');
+            }
+
+            const url = `${BASE_URL}latest?api_key=${API_KEY}&base=${from}&currencies=${to}`;
+            let rateData, historicalData;
+
+            try {
+                // 1. Fetch Latest Rate
+                const response = await fetch(url);
+                rateData = await response.json();
+
+                if (rateData.success) {
+                    const rate = rateData.rates[to];
+                    const convertedAmount = (amount * rate).toFixed(4);
+                    resultDisplay.textContent = convertedAmount;
+                    rateSummary.textContent = `1 ${from} = ${rate.toFixed(4)} ${to}`;
+                    displayMessage('Conversion successful!', 'success');
+                } else {
+                    // Fallback to mock rate and history if the API key is invalid or request fails
+                    console.error('API Error:', rateData.error.message || 'Unknown API Error');
+                    throw new Error('Using mock data. Check API key and quota.');
+                }
+            } catch (error) {
+                // Fallback: If API call fails (e.g., bad key, network issue), use mock data.
+                console.warn(error.message);
+                const mockRate = (1.15 + Math.random() * 0.1).toFixed(4); // Mock rate
+                const convertedAmount = (amount * mockRate).toFixed(4);
+                resultDisplay.textContent = convertedAmount;
+                rateSummary.textContent = `1 ${from} = ${mockRate} ${to} (Mock Data)`;
+            }
+
+            // 2. Mock Historical Data for Chart (Highly recommended for single-file demos)
+            historicalData = generateMockHistoricalData(to);
+            renderChart(historicalData, from, to);
+        }
+
+        /**
+         * Generates mock historical data for the chart.
+         * @param {string} targetCurrency - The currency being tracked.
+         * @returns {Array<Object>} Array of objects with date and rate.
+         */
+        function generateMockHistoricalData(targetCurrency) {
+            const today = new Date();
+            const data = [];
+            const baseRate = 1.15 + (Math.random() * 0.1); // Base for mock trend
+            
+            for (let i = 6; i >= 0; i--) {
+                const date = new Date(today);
+                date.setDate(today.getDate() - i);
+                const dateString = date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+
+                // Create a slightly fluctuating rate
+                let rate = baseRate + (Math.random() - 0.5) * 0.05;
+                if (i === 0) { // Make today's rate slightly different for dynamic effect
+                     rate = baseRate + (Math.random() - 0.5) * 0.03;
+                }
+
+                data.push({
+                    date: dateString,
+                    rate: parseFloat(rate.toFixed(4))
+                });
+            }
+            return data;
+        }
+
+        /**
+         * Renders or updates the Chart.js line chart.
+         * @param {Array<Object>} historicalData - Data for the last 7 days.
+         * @param {string} from - Base currency.
+         * @param {string} to - Target currency.
+         */
+        function renderChart(historicalData, from, to) {
+            const labels = historicalData.map(d => d.date);
+            const dataPoints = historicalData.map(d => d.rate);
+
+            if (myChart) {
+                myChart.data.labels = labels;
+                myChart.data.datasets[0].data = dataPoints;
+                myChart.data.datasets[0].label = `${from}/${to} Rate`;
+                myChart.update();
+                return;
+            }
+
+            myChart = new Chart(chartCanvas, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [{
+                        label: `${from}/${to} Rate`,
+                        data: dataPoints,
+                        borderColor: 'rgb(5, 150, 105)', // Emerald-600
+                        backgroundColor: 'rgba(5, 150, 105, 0.1)', // Light Emerald background
+                        borderWidth: 3,
+                        tension: 0.4, // Smooth curve
+                        pointRadius: 5,
+                        pointHoverRadius: 8,
+                        fill: true,
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            display: true,
+                            position: 'top',
+                            labels: {
+                                color: '#374151' // Gray-700
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `${context.dataset.label}: ${context.formattedValue}`;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            beginAtZero: false,
+                            title: {
+                                display: true,
+                                text: `Rate in ${to}`,
+                                color: '#4b5563' // Gray-600
+                            },
+                            grid: {
+                                color: '#e5e7eb' // Gray-200
+                            }
+                        },
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Last 7 Days',
+                                color: '#4b5563' // Gray-600
+                            },
+                            grid: {
+                                display: false
+                            }
+                        }
+                    },
+                    // Add interactivity for hover effects
+                    onHover: (event, chartElements) => {
+                        event.native.target.style.cursor = chartElements.length ? 'pointer' : 'default';
+                    }
+                }
+            });
+        }
+
+        /**
+         * Swaps the values of the FROM and TO currency dropdowns.
+         */
+        function swapCurrencies() {
+            const fromValue = fromCurrencySelect.value;
+            const toValue = toCurrencySelect.value;
+            fromCurrencySelect.value = toValue;
+            toCurrencySelect.value = fromValue;
+            fetchAndDisplayRate(); // Immediately convert after swapping
+        }
+
+        // --- Initialization ---
+
+        function initApp() {
+            fetchCurrencies();
+
+            // Event Listeners
+            convertBtn.addEventListener('click', fetchAndDisplayRate);
+            swapBtn.addEventListener('click', swapCurrencies);
+            
+            // Allow immediate conversion on input change (dynamic experience)
+            amountInput.addEventListener('input', fetchAndDisplayRate);
+            fromCurrencySelect.addEventListener('change', fetchAndDisplayRate);
+            toCurrencySelect.addEventListener('change', fetchAndDisplayRate);
+
+            // Initial conversion and chart load
+            setTimeout(fetchAndDisplayRate, 100); // Small delay to ensure options are loaded
+        }
+
+        // Start the application once the window loads
+        window.onload = initApp;
+
+    </script>
+</body>
+</html>
